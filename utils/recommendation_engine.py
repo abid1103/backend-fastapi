@@ -4,8 +4,6 @@ import json
 import math
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
-import mysql.connector
-from mysql.connector import Error
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
 from dotenv import load_dotenv
