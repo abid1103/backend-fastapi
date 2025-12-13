@@ -32,7 +32,6 @@ from utils.reddit_api import get_reddit_posts
 from utils.category_models import predict_category
 from utils.recommendation_engine import router as rec_router
 from routes.admin_routes import router as admin_router
-from utils.forecasting import multi_model_forecast
 
 load_dotenv()
 
@@ -207,6 +206,8 @@ def forecast_trends(keyword: str, region: str | None = None):
     df["date"] = pd.to_datetime(df["date"])
     df = df.set_index("date").sort_index()
 
+    
+    from utils.forecasting import multi_model_forecast
     result = multi_model_forecast(df)
 
     return {
