@@ -12,6 +12,8 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.middleware.wsgi import WSGIMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from datetime import datetime, timezone, timedelta
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -31,7 +33,9 @@ from routes.admin_routes import router as admin_router
 
 load_dotenv()
 
-app = FastAPI()
+app = FastAPI(root_path="/api")  # All routes prefixed with /api
+
+
 FRONTEND_URL = os.getenv("FRONTEND_URL", "https://brandinsightai.vercel.app")
 
 # ---------------- Lazy import for deployment blocker ----------------
