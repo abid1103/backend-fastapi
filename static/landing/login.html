@@ -1314,12 +1314,14 @@
                 LoadingOverlay.show('Signing you in...');
 
                 try {
-                    const response = await fetch('https://backend-fastapi-mz7v.onrender.com//login', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ email, password })
-                    });
-
+                const response = await fetch(
+                  'https://backend-fastapi-mz7v.onrender.com/signup',
+                  {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ email, password })
+                  });
                     const data = await response.json();
 
                     if (response.ok) {
@@ -1381,13 +1383,20 @@
                 LoadingOverlay.show('Creating your account...');
 
                 try {
-                    const response = await fetch('https://backend-fastapi-mz7v.onrender.com//signup', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ name, email, company, password })
-                    });
+                const response = await fetch(
+                  'https://backend-fastapi-mz7v.onrender.com/login',
+                  {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ email, password })
+                  });
 
-                    const data = await response.json();
+
+                    let data = {};
+                    try {
+                        data = await response.json();
+                    } catch (e) {}
 
                     if (response.ok) {
                         Toast.show('Account created successfully! You can now sign in.', 'success', 'Welcome Aboard!');
