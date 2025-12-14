@@ -11,7 +11,7 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from datetime import datetime, timezone, timedelta
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -32,6 +32,7 @@ from routes.admin_routes import router as admin_router
 load_dotenv()
 
 app = FastAPI()
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://brandinsightai.vercel.app")
 
 # ---------------- Lazy import for deployment blocker ----------------
 multi_model_forecast = None
@@ -64,7 +65,10 @@ CATEGORY_API_MAPPING = {
 # --- CORS ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[*],
+    allow_origins=[
+        "http://localhost:5173",
+        "https://brandinsightai.vercel.app"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -81,6 +85,14 @@ def serve_landing_page():
     if os.path.exists(path):
         return FileResponse(path)
     return {"error": "Landing page not found"}
+
+
+
+@app.get("/dashboard")
+@app.get("/dashboard/{path:path}")
+
+def serve_dashboard(path: str = ""):
+    return RedirectResponse(f"{FRONTEND_URL}/dashboard/{path}")
 
 # ---------------- Schemas ----------------
 class SignupRequest(BaseModel):
@@ -133,15 +145,15 @@ def login(user: LoginRequest, response: Response):
         "email": db_user["email"],
         "role": db_user["role"]
     })
-
-    secure_flag = os.getenv("ENV") == "production"
+    
     response.set_cookie(
         key="access_token",
         value=token,
         httponly=True,
-        secure=secure_flag,
-        samesite="lax"
+        secure=True,
+        samesite="none"
     )
+
 
     return {"access_token": token}
 
@@ -229,7 +241,7 @@ def fetch_and_store_trends(keyword: str, geo: str):
 async def fetch_trends_endpoint(body: TrendRequest):
     try:
         conn = get_connection()
-        cursor = conn.cursor() if conn else None
+        cursor = conn.cursor(cursor_factory=RealDictCursor) if conn else None
 
         # Check if data exists and is fresh (<=30 days old)
         fresh_threshold = datetime.utcnow() - timedelta(days=14)
@@ -254,7 +266,8 @@ async def fetch_trends_endpoint(body: TrendRequest):
                     cursor.execute("""
                         INSERT INTO google_trend (keyword, geo, date, interest)
                         VALUES (%s, %s, %s, %s)
-                        ON DUPLICATE KEY UPDATE interest=VALUES(interest)
+                        ON CONFLICT (keyword, geo, date)
+                        DO UPDATE SET interest = EXCLUDED.interest
                     """, (body.keyword, body.geo, row["date"], row["value"]))
                 conn.commit()
 
@@ -276,7 +289,7 @@ async def get_trends_endpoint(body: TrendRequest):
             raise HTTPException(
                 status_code=500, detail="Database connection failed")
 
-        cursor = conn.cursor()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         cursor.execute("""
             SELECT date, interest FROM google_trend
             WHERE keyword=%s AND geo=%s
@@ -320,7 +333,7 @@ def fetch_reddit(keyword: str):
         return {"error": "No Reddit data found"}
     conn = get_connection()
     if conn:
-        cursor = conn.cursor()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         for post in reddit_data:
             ts = post["created_utc"]
             if isinstance(ts, datetime):
@@ -331,9 +344,10 @@ def fetch_reddit(keyword: str):
                     float(ts), tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
             cursor.execute("""
-                INSERT IGNORE INTO reddit_posts 
+                INSERT INTO reddit_posts
                 (reddit_id, keyword, title, score, url, created_utc, num_comments, sentiment)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, NULL)
+                ON CONFLICT (reddit_id) DO NOTHING
             """, (
                 post["reddit_id"],  # use post["reddit_id"], not sub.id
                 keyword,
@@ -354,7 +368,7 @@ def fetch_reddit(keyword: str):
 def analyze_reddit_sentiment():
     conn = get_connection()
     if conn:
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         cursor.execute(
             "SELECT id, title FROM reddit_posts WHERE sentiment IS NULL"
         )
@@ -391,7 +405,7 @@ def analyze_reddit_sentiment():
 @app.get("/sentiment/{keyword}")
 def get_sentiment_results(keyword: str):
     conn = get_connection()
-    cursor = conn.cursor(dictionary=True)
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
 
     # Fetch posts with sentiment
     cursor.execute("""
@@ -434,7 +448,7 @@ def fetch_trends_if_missing(keyword: str, geo: str = "") -> None:
     if not conn:
         raise HTTPException(
             status_code=500, detail="Database connection failed")
-    cursor = conn.cursor()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
     cursor.execute("""
         SELECT COUNT(*) FROM google_trend
         WHERE keyword=%s AND geo=%s
@@ -448,7 +462,9 @@ def fetch_trends_if_missing(keyword: str, geo: str = "") -> None:
     # Call /fetch-trends endpoint logic
     body = TrendRequest(keyword=keyword, geo=geo)
     # fetch_trends_endpoint is async, so run it
-    asyncio.run(fetch_trends_endpoint(body))
+    loop = asyncio.get_event_loop()
+    loop.create_task(fetch_trends_endpoint(body))
+
 
 
 # -------------------------
@@ -485,7 +501,7 @@ def generate_recommendation(keyword: str):
     if not conn:
         raise HTTPException(status_code=500, detail="DB Connection failed")
 
-    cursor = conn.cursor(dictionary=True)
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
 
     # 1️⃣ Fetch historical trend
     cursor.execute("""
@@ -582,7 +598,7 @@ def get_current_user(access_token: str | None = Cookie(default=None)):
     if not conn:
         raise HTTPException(
             status_code=500, detail="Database connection failed")
-    cursor = conn.cursor(dictionary=True)
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
     cursor.execute(
         "SELECT id, name, email, avatar_url, two_factor_enabled, two_factor_secret FROM users WHERE id=%s", (user_id,))
     user = cursor.fetchone()
@@ -618,7 +634,7 @@ def update_profile(name: str = Form(...), current_user=Depends(get_current_user)
     if not conn:
         raise HTTPException(
             status_code=500, detail="Database connection failed")
-    cursor = conn.cursor()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
     cursor.execute("UPDATE users SET name=%s WHERE id=%s",
                    (name, current_user["id"]))
     conn.commit()
@@ -637,7 +653,7 @@ def change_password(req: ChangePwdReq, current_user=Depends(get_current_user)):
     if not conn:
         raise HTTPException(
             status_code=500, detail="Database connection failed")
-    cursor = conn.cursor(dictionary=True)
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
     cursor.execute("SELECT password FROM users WHERE id=%s",
                    (current_user["id"],))
     row = cursor.fetchone()
@@ -671,7 +687,7 @@ def upload_avatar(file: UploadFile = File(...), current_user=Depends(get_current
         avatar_url = f"/static/uploads/{safe_name}"
 
         conn = get_connection()
-        cursor = conn.cursor()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         cursor.execute("UPDATE users SET avatar_url=%s WHERE id=%s",
                        (avatar_url, current_user["id"]))
         conn.commit()
@@ -701,7 +717,7 @@ def twofa_setup(current_user=Depends(get_current_user)):
         qr_b64 = base64.b64encode(buffered.getvalue()).decode()
         # Save temp secret to DB column 'two_factor_secret' (you may choose a separate temp column)
         conn = get_connection()
-        cursor = conn.cursor()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         cursor.execute(
             "UPDATE users SET two_factor_secret=%s WHERE id=%s", (secret, current_user["id"]))
         conn.commit()
@@ -729,7 +745,7 @@ def twofa_verify(req: TwoFAVerify, current_user=Depends(get_current_user)):
         totp = pyotp.TOTP(secret)
         if totp.verify(req.code):
             conn = get_connection()
-            cursor = conn.cursor()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
             cursor.execute(
                 "UPDATE users SET two_factor_enabled=1 WHERE id=%s", (current_user["id"],))
             conn.commit()
