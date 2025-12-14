@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict
 import os
 import secrets
-
+from psycopg2.extras import RealDictCursor
 from utils.db_connection import get_connection
 from utils.auth_utils import decode_access_token, hash_password
 
@@ -54,7 +54,7 @@ async def get_current_admin(request: Request):
     if not conn:
         raise HTTPException(
             status_code=500, detail="Database connection failed")
-    cursor = conn.cursor(dictionary=True)
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
     cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
     current_user = cursor.fetchone()
     conn.close()
@@ -84,7 +84,7 @@ def list_users(limit: int = 50, offset: int = 0, admin=Depends(get_current_admin
     if not conn:
         raise HTTPException(
             status_code=500, detail="Database connection failed")
-    cursor = conn.cursor(dictionary=True)
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
     cursor.execute(
         "SELECT id, name, email, company, created_at, avatar_url, two_factor_enabled, role FROM users ORDER BY id DESC LIMIT %s OFFSET %s",
         (limit, offset)
@@ -97,7 +97,7 @@ def list_users(limit: int = 50, offset: int = 0, admin=Depends(get_current_admin
 @router.get("/users/{user_id}")
 def get_user(user_id: int, admin=Depends(get_current_admin)):
     conn = get_connection()
-    cursor = conn.cursor(dictionary=True)
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
     user = fetch_user_by_id(cursor, user_id)
     conn.close()
     if not user:
@@ -108,7 +108,7 @@ def get_user(user_id: int, admin=Depends(get_current_admin)):
 @router.put("/users/{user_id}")
 def update_user(user_id: int, payload: UpdateUserRequest, admin=Depends(get_current_admin)):
     conn = get_connection()
-    cursor = conn.cursor()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
     fields = []
     values = []
     if payload.name is not None:
@@ -139,7 +139,7 @@ def update_user(user_id: int, payload: UpdateUserRequest, admin=Depends(get_curr
 @router.delete("/users/{user_id}")
 def delete_user(user_id: int, admin=Depends(get_current_admin)):
     conn = get_connection()
-    cursor = conn.cursor()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
     cursor.execute("DELETE FROM users WHERE id = %s", (user_id,))
     conn.commit()
     affected = cursor.rowcount
@@ -155,7 +155,7 @@ def reset_password(user_id: int, body: ResetPasswordRequest, admin=Depends(get_c
         8)
     hashed = hash_password(new_pw)
     conn = get_connection()
-    cursor = conn.cursor()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
     cursor.execute(
         "UPDATE users SET password = %s WHERE id = %s", (hashed, user_id))
     conn.commit()
@@ -169,7 +169,7 @@ def reset_password(user_id: int, body: ResetPasswordRequest, admin=Depends(get_c
 @router.post("/users/{user_id}/toggle-2fa")
 def toggle_2fa(user_id: int, enable: bool, admin=Depends(get_current_admin)):
     conn = get_connection()
-    cursor = conn.cursor()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
     cursor.execute("UPDATE users SET two_factor_enabled = %s WHERE id = %s",
                    (1 if enable else 0, user_id))
     conn.commit()
