@@ -257,8 +257,11 @@ async def fetch_trends_endpoint(body: TrendRequest):
                 ORDER BY date
             """, (body.keyword, body.geo, fresh_threshold))
             rows = cursor.fetchall()
-            trends = [{"date": row[0].isoformat(), "value": row[1]}
-                      for row in rows]
+            trends = [
+                {"date": row["date"].isoformat(), "value": row["interest"]}
+                for row in rows
+            ]
+
 
         # If no fresh data, fetch from Google
         if not trends:
@@ -302,8 +305,11 @@ async def get_trends_endpoint(body: TrendRequest):
 
         rows = cursor.fetchall()
 
-        trends = [{"date": row[0].isoformat(), "value": row[1]}
-                  for row in rows]
+        trends = [
+            {"date": row["date"].isoformat(), "value": row["interest"]}
+            for row in rows
+        ]
+
 
         anomalies = []  # you already had this
 
